@@ -1,8 +1,6 @@
-/*
- * Copyright (c) 2021-2023, R.I. Pienaar and the Choria Project contributors
- *
- * SPDX-License-Identifier: Apache-2.0
- */
+// Copyright (c) 2021-2023, R.I. Pienaar and the Choria Project contributors
+//
+// SPDX-License-Identifier: Apache-2.0
 
 package tokens
 
