@@ -1,6 +1,8 @@
-// Copyright (c) 2021, R.I. Pienaar and the Choria Project contributors
-//
-// SPDX-License-Identifier: Apache-2.0
+/*
+ * Copyright (c) 2021-2023, R.I. Pienaar and the Choria Project contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 package tokens
 
@@ -11,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	iu "github.com/choria-io/go-choria/internal/util"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/segmentio/ksuid"
 )
@@ -69,7 +70,7 @@ func (c *StandardClaims) AddOrgIssuerData(priK ed25519.PrivateKey) error {
 		return err
 	}
 
-	sig, err := iu.Ed25519Sign(priK, dat)
+	sig, err := ed25519Sign(priK, dat)
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func (c *StandardClaims) AddChainIssuerData(chainIssuer *ClientIDClaims, prik ed
 		return err
 	}
 
-	usig, err := iu.Ed25519Sign(prik, udat)
+	usig, err := ed25519Sign(prik, udat)
 	if err != nil {
 		return err
 	}
@@ -151,7 +152,7 @@ func (c *StandardClaims) IsChainedIssuer(verify bool) bool {
 		return false
 	}
 
-	ok, _ := iu.Ed25519Verify(pubK, dat, sig)
+	ok, _ := ed25519Verify(pubK, dat, sig)
 
 	return ok
 }
@@ -337,7 +338,7 @@ func (c *StandardClaims) IsSignedByIssuer(pk ed25519.PublicKey) (bool, ed25519.P
 			return false, nil, err
 		}
 
-		valid, err := iu.Ed25519Verify(pk, dat, sig)
+		valid, err := ed25519Verify(pk, dat, sig)
 		if err != nil {
 			return false, nil, err
 		}
@@ -371,7 +372,7 @@ func (c *StandardClaims) IsSignedByIssuer(pk ed25519.PublicKey) (bool, ed25519.P
 
 		// this is the signature from the handler
 		// now we check the signature is data + "." + sig(id+ "." + data)
-		ok, err := iu.Ed25519Verify(hPubk, []byte(fmt.Sprintf("%s.%s", c.ID, tcs)), sig)
+		ok, err := ed25519Verify(hPubk, []byte(fmt.Sprintf("%s.%s", c.ID, tcs)), sig)
 		if err != nil {
 			return false, nil, fmt.Errorf("chain signature validation failed: %w", err)
 		}

@@ -1,0 +1,14 @@
+.DS_Store
+.vscode
+*.bak
+*.coverprofile
+*.db
+*.deb
+*.dsc
+*.rpm
+*.swp
+*.tgz
+.idea/
+*.msi
+*.exe
+*.test
