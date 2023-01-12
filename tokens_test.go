@@ -16,6 +16,7 @@ import (
 	"github.com/golang-jwt/jwt/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
+	"github.com/sirupsen/logrus"
 )
 
 func loadRSAPubKey(k string) *rsa.PublicKey {
@@ -60,6 +61,74 @@ var _ = Describe("Tokens", func() {
 		provJWTED25519, err = os.ReadFile("testdata/ed25519/good-provisioning.jwt")
 		Expect(err).ToNot(HaveOccurred())
 
+	})
+
+	Describe("NatsConnectionHelpers", func() {
+		var pk ed25519.PrivateKey
+		var pubk ed25519.PublicKey
+		var err error
+		var log *logrus.Entry
+
+		BeforeEach(func() {
+			pubk, pk = loadEd25519Seed("testdata/ed25519/other.seed")
+			Expect(err).ToNot(HaveOccurred())
+
+			log = logrus.NewEntry(logrus.New())
+			log.Logger.SetOutput(GinkgoWriter)
+		})
+
+		It("Should test required settings", func() {
+			_, _, _, err := NatsConnectionHelpers("", "", "", log)
+			Expect(err).To(MatchError("collective is required"))
+
+			_, _, _, err = NatsConnectionHelpers("", "choria", "", log)
+			Expect(err).To(MatchError("seedfile is required"))
+		})
+
+		It("Should fail for unsupported tokens", func() {
+			pt, err := NewProvisioningClaims(true, true, "x", "", "", nil, "example.net", "", "", "choria", "", time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+
+			token, err := SignToken(pt, pk)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, _, _, err = NatsConnectionHelpers(token, "choria", "testdata/ed25519/other.seed", log)
+			Expect(err).To(MatchError("unsupported token purpose: choria_provisioning"))
+		})
+
+		It("Should support client tokens", func() {
+			ct, err := NewClientIDClaims("ginkgo", nil, "choria", nil, "", "", time.Hour, nil, pubk)
+			Expect(err).ToNot(HaveOccurred())
+
+			token, err := SignToken(ct, pk)
+			Expect(err).ToNot(HaveOccurred())
+
+			inbox, jh, sigh, err := NatsConnectionHelpers(token, "choria", "testdata/ed25519/other.seed", log)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(inbox).To(Equal("choria.reply.4bb6777bb903cae3166e826932f7fe94"))
+			Expect(jh()).To(Equal(token))
+
+			expected, err := ed25519Sign(pk, []byte("toomanysecrets"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(sigh([]byte("toomanysecrets"))).To(Equal(expected))
+		})
+
+		It("Should support server tokens", func() {
+			st, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "choria", nil, nil, pubk, "", time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+
+			token, err := SignToken(st, pk)
+			Expect(err).ToNot(HaveOccurred())
+
+			inbox, jh, sigh, err := NatsConnectionHelpers(token, "choria", "testdata/ed25519/other.seed", log)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(inbox).To(Equal("choria.reply.3f7c3a791b0eb10da51dca4cdedb9418"))
+			Expect(jh()).To(Equal(token))
+
+			expected, err := ed25519Sign(pk, []byte("toomanysecrets"))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(sigh([]byte("toomanysecrets"))).To(Equal(expected))
+		})
 	})
 
 	Describe("ParseToken", func() {
