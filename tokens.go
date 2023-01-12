@@ -1,6 +1,8 @@
-// Copyright (c) 2021-2022, R.I. Pienaar and the Choria Project contributors
-//
-// SPDX-License-Identifier: Apache-2.0
+/*
+ * Copyright (c) 2021-2023, R.I. Pienaar and the Choria Project contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 package tokens
 
@@ -22,11 +24,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/choria-io/go-choria/build"
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/segmentio/ksuid"
 	"github.com/sirupsen/logrus"
-	"github.com/tidwall/gjson"
 )
 
 var (
@@ -46,9 +46,10 @@ const (
 	OrgIssuerPrefix   = "I-"
 	ChainIssuerPrefix = "C-"
 	DefaultValidity   = time.Hour
+	version           = "v0.0.1"
 )
 
-var defaultIssuer = fmt.Sprintf("Choria Tokens Package v%s", build.Version)
+var defaultIssuer = fmt.Sprintf("Choria Tokens Package %s", version)
 
 // Purpose indicates what kind of token a JWT is and helps us parse it into the right data structure
 type Purpose string
@@ -282,19 +283,27 @@ func SaveAndSignTokenWithVault(ctx context.Context, claims jwt.Claims, key strin
 		return fmt.Errorf("request failed: code: %d: %s", resp.StatusCode, string(body))
 	}
 
-	sig := gjson.GetBytes(body, "data.signature")
-	if !sig.Exists() {
+	var vr struct {
+		Data struct {
+			Sig string `json:"signature"`
+		} `json:"data"`
+	}
+	err = json.Unmarshal(body, &vr)
+	if err != nil {
+		return err
+	}
+
+	if vr.Data.Sig == "" {
 		return fmt.Errorf("no signature in response: %s", string(body))
 	}
 
-	sigs := sig.String()
 	const vaultSigPrefix = "vault:v1:"
 
-	if !strings.HasPrefix(sigs, vaultSigPrefix) {
+	if !strings.HasPrefix(vr.Data.Sig, vaultSigPrefix) {
 		return fmt.Errorf("invalid signature, no vault:v1 prefix")
 	}
 
-	signature, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(sigs, vaultSigPrefix))
+	signature, err := base64.StdEncoding.DecodeString(strings.TrimPrefix(vr.Data.Sig, vaultSigPrefix))
 	if err != nil {
 		return fmt.Errorf("could not decode vault response: %w", err)
 	}
@@ -359,4 +368,65 @@ func readRSAOrED25519PublicData(dat []byte) (any, error) {
 	}
 
 	return pk, nil
+}
+
+// NatsConnectionHelpers constructs token based private inbox and helpers for the nats.UserJWT() function. Only Server and Client tokens are supported.
+func NatsConnectionHelpers(token string, collective string, seedFile string, log *logrus.Entry) (inbox string, jwth func() (string, error), sigh func([]byte) ([]byte, error), err error) {
+	if collective == "" {
+		return "", nil, nil, fmt.Errorf("collective is required")
+	}
+
+	if seedFile == "" {
+		return "", nil, nil, fmt.Errorf("seedfile is required")
+	}
+
+	purpose := TokenPurpose(token)
+
+	var uid string
+	var isExp func() bool
+	var exp time.Time
+
+	switch purpose {
+	case ClientIDPurpose:
+		client, err := ParseClientIDTokenUnverified(token)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		_, uid = client.UniqueID()
+		isExp = client.IsExpired
+		exp = client.ExpireTime()
+
+	case ServerPurpose:
+		server, err := ParseServerTokenUnverified(token)
+		if err != nil {
+			return "", nil, nil, err
+		}
+		_, uid = server.UniqueID()
+		isExp = server.IsExpired
+		exp = server.ExpireTime()
+
+	default:
+		return "", nil, nil, fmt.Errorf("unsupported token purpose: %v", purpose)
+	}
+
+	inbox = fmt.Sprintf("%s.reply.%s", collective, uid)
+
+	jwth = func() (string, error) {
+		if isExp() {
+			log.Errorf("Cannot sign connection NONCE: token is expired by %v", time.Since(exp))
+			return "", fmt.Errorf("token expired")
+		}
+		return token, nil
+	}
+
+	sigh = func(n []byte) ([]byte, error) {
+		if isExp() {
+			log.Errorf("Cannot sign connection NONCE: token is expired by %v", time.Since(exp))
+			return nil, fmt.Errorf("token expired")
+		}
+		log.Debugf("Signing nonce using seed file %s", seedFile)
+		return ed25519SignWithSeedFile(seedFile, n)
+	}
+
+	return inbox, jwth, sigh, nil
 }

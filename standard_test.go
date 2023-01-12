@@ -1,16 +1,18 @@
-// Copyright (c) 2022, R.I. Pienaar and the Choria Project contributors
-//
-// SPDX-License-Identifier: Apache-2.0
+/*
+ * Copyright (c) 2022-2023, R.I. Pienaar and the Choria Project contributors
+ *
+ * SPDX-License-Identifier: Apache-2.0
+ */
 
 package tokens
 
 import (
 	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/hex"
 	"fmt"
 	"time"
 
-	iu "github.com/choria-io/go-choria/internal/util"
 	"github.com/golang-jwt/jwt/v4"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
@@ -27,7 +29,7 @@ var _ = Describe("StandardClaims", func() {
 
 	BeforeEach(func() {
 		c, _ = newStandardClaims("ginkgo", "", time.Hour, false)
-		pubK, priK, err = iu.Ed25519KeyPair()
+		pubK, priK, err = ed25519.GenerateKey(rand.Reader)
 		Expect(err).ToNot(HaveOccurred())
 
 	})
@@ -211,13 +213,13 @@ var _ = Describe("StandardClaims", func() {
 
 			It("Should detect incorrect signatures", func() {
 				// the org issuer
-				issuePubK, issuerPriK, err := iu.Ed25519KeyPair()
+				issuePubK, issuerPriK, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
-				handlerPubK, _, err := iu.Ed25519KeyPair()
+				handlerPubK, _, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
-				userPubK, _, err := iu.Ed25519KeyPair()
+				userPubK, _, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
 				// the handler signed by the org issuer
@@ -226,7 +228,7 @@ var _ = Describe("StandardClaims", func() {
 				handler.SetOrgIssuer(issuePubK)
 				hdat, err := handler.OrgIssuerChainData()
 				Expect(err).ToNot(HaveOccurred())
-				hsig, err := iu.Ed25519Sign(issuerPriK, hdat)
+				hsig, err := ed25519Sign(issuerPriK, hdat)
 				Expect(err).ToNot(HaveOccurred())
 				handler.TrustChainSignature = "invalid"
 
@@ -252,13 +254,13 @@ var _ = Describe("StandardClaims", func() {
 
 			It("Should detect correct signatures", func() {
 				// the org issuer
-				issuePubK, issuerPriK, err := iu.Ed25519KeyPair()
+				issuePubK, issuerPriK, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
-				handlerPubK, handlerPrik, err := iu.Ed25519KeyPair()
+				handlerPubK, handlerPrik, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
-				userPubK, _, err := iu.Ed25519KeyPair()
+				userPubK, _, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
 				// the handler signed by the org issuer
@@ -267,7 +269,7 @@ var _ = Describe("StandardClaims", func() {
 				handler.SetOrgIssuer(issuePubK)
 				hdat, err := handler.OrgIssuerChainData()
 				Expect(err).ToNot(HaveOccurred())
-				hsig, err := iu.Ed25519Sign(issuerPriK, hdat)
+				hsig, err := ed25519Sign(issuerPriK, hdat)
 				Expect(err).ToNot(HaveOccurred())
 				handler.TrustChainSignature = hex.EncodeToString(hsig)
 
@@ -277,7 +279,7 @@ var _ = Describe("StandardClaims", func() {
 				Expect(user.SetChainIssuer(handler)).To(Succeed())
 				udat, err := user.ChainIssuerData(handler.TrustChainSignature)
 				Expect(err).ToNot(HaveOccurred())
-				usig, err := iu.Ed25519Sign(handlerPrik, udat)
+				usig, err := ed25519Sign(handlerPrik, udat)
 				Expect(err).ToNot(HaveOccurred())
 				user.SetChainUserTrustSignature(handler, usig)
 				ok, _, err := user.IsSignedByIssuer(issuePubK)
@@ -364,7 +366,7 @@ var _ = Describe("StandardClaims", func() {
 				c.Issuer = fmt.Sprintf("I-%s", c.PublicKey)
 				c.ID = ksuid.New().String()
 
-				sig, err := iu.Ed25519Sign(priK, []byte("wrong"))
+				sig, err := ed25519Sign(priK, []byte("wrong"))
 				Expect(err).ToNot(HaveOccurred())
 				c.TrustChainSignature = hex.EncodeToString(sig)
 
@@ -381,7 +383,7 @@ var _ = Describe("StandardClaims", func() {
 				dat, err := c.OrgIssuerChainData()
 				Expect(err).ToNot(HaveOccurred())
 
-				sig, err := iu.Ed25519Sign(priK, dat)
+				sig, err := ed25519Sign(priK, dat)
 				Expect(err).ToNot(HaveOccurred())
 				c.TrustChainSignature = hex.EncodeToString(sig)
 
@@ -394,7 +396,7 @@ var _ = Describe("StandardClaims", func() {
 
 		Describe("SetOrgIssuer", func() {
 			It("Should set the correct issuer", func() {
-				pubK, _, err := iu.Ed25519KeyPair()
+				pubK, _, err := ed25519.GenerateKey(rand.Reader)
 				Expect(err).ToNot(HaveOccurred())
 
 				c.SetOrgIssuer(pubK)
