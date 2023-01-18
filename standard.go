@@ -5,7 +5,9 @@
 package tokens
 
 import (
+	"context"
 	"crypto/ed25519"
+	"crypto/tls"
 	"encoding/hex"
 	"fmt"
 	"strings"
@@ -13,6 +15,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/segmentio/ksuid"
+	"github.com/sirupsen/logrus"
 )
 
 type StandardClaims struct {
@@ -32,13 +35,13 @@ type StandardClaims struct {
 }
 
 // ExpireTime determines the expiry time based on issuer expiry and token expiry
-func (s *StandardClaims) ExpireTime() time.Time {
+func (c *StandardClaims) ExpireTime() time.Time {
 	var iexp, exp time.Time
-	if s.IssuerExpiresAt != nil {
-		iexp = s.IssuerExpiresAt.Time
+	if c.IssuerExpiresAt != nil {
+		iexp = c.IssuerExpiresAt.Time
 	}
-	if s.ExpiresAt != nil {
-		exp = s.ExpiresAt.Time
+	if c.ExpiresAt != nil {
+		exp = c.ExpiresAt.Time
 	}
 
 	if iexp.IsZero() {
@@ -57,8 +60,8 @@ func (s *StandardClaims) ExpireTime() time.Time {
 }
 
 // IsExpired checks if the token has expired
-func (s *StandardClaims) IsExpired() bool {
-	return time.Now().After(s.ExpireTime())
+func (c *StandardClaims) IsExpired() bool {
+	return time.Now().After(c.ExpireTime())
 }
 
 // AddOrgIssuerData adds the data that a Chain Issuer needs to be able to issue clients in an Org managed by an Issuer
@@ -74,6 +77,29 @@ func (c *StandardClaims) AddOrgIssuerData(priK ed25519.PrivateKey) error {
 	}
 
 	c.SetOrgIssuer(priK.Public().(ed25519.PublicKey))
+	c.SetChainIssuerTrustSignature(sig)
+
+	return nil
+}
+
+// AddOrgIssuerDataUsingVault adds the data that a Chain Issuer needs to be able to issue clients in an Org managed by an Issuer by using Vault to sign the data using the named key `priK`.
+func (c *StandardClaims) AddOrgIssuerDataUsingVault(ctx context.Context, tlsc *tls.Config, priK string, log *logrus.Entry) error {
+	issuer, err := getVaultIssuerPubKey(ctx, tlsc, priK, log)
+	if err != nil {
+		return err
+	}
+
+	dat, err := c.OrgIssuerChainData()
+	if err != nil {
+		return err
+	}
+
+	sig, err := signWithVault(ctx, tlsc, priK, dat, log)
+	if err != nil {
+		return err
+	}
+
+	c.SetOrgIssuer(issuer)
 	c.SetChainIssuerTrustSignature(sig)
 
 	return nil
