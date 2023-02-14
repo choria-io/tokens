@@ -340,4 +340,38 @@ var _ = Describe("Tokens", func() {
 			Expect(claims.ExpiresAt.Time).To(BeTemporally("~", time.Now().Add(5*time.Hour), time.Second))
 		})
 	})
+
+	Describe("IsEncodedEd25519Key", func() {
+		It("Should correctly detect based on length", func() {
+			Expect(IsEncodedEd25519Key([]byte("1f5bcd09026ef84134d0963c17d6df388366a8767b418c209168dc8bb579f82b"))).To(BeTrue())
+			Expect(IsEncodedEd25519Key([]byte("1f5bcd09026ef84134d0963c17d6df388366a8767b418c209168dc8bb579f82"))).To(BeFalse())
+			Expect(IsEncodedEd25519Key([]byte("1f5bcd09026ef84134d0963c17d6df388366a8767b418c209168dc8bb579f82b2"))).To(BeFalse())
+			Expect(IsEncodedEd25519Key([]byte(""))).To(BeFalse())
+		})
+
+		It("Should detect hex strings correctly", func() {
+			var valid, invalid int
+
+			pk := []byte("1f5bcd09026ef84134d0963c17d6df388366a8767b418c209168dc8bb579f82b")
+
+			for i := 0; i < 256; i++ {
+				pk[10] = byte(i)
+
+				var isHex bool
+
+				_, err := hex.DecodeString(string(pk))
+				if err != nil {
+					invalid++
+				} else {
+					isHex = true
+					valid++
+				}
+
+				Expect(IsEncodedEd25519Key(pk)).To(Equal(isHex))
+			}
+
+			Expect(valid).To(BeNumerically(">", 1))
+			Expect(invalid).To(BeNumerically(">", 1))
+		})
+	})
 })
