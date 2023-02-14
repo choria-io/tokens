@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"time"
 
@@ -28,11 +29,12 @@ import (
 )
 
 var (
-	algRS256     = jwt.SigningMethodRS256.Alg()
-	algRS384     = jwt.SigningMethodRS384.Alg()
-	algRS512     = jwt.SigningMethodRS512.Alg()
-	algEdDSA     = jwt.SigningMethodEdDSA.Alg()
-	validMethods = []string{algRS256, algRS384, algRS512, algEdDSA}
+	algRS256          = jwt.SigningMethodRS256.Alg()
+	algRS384          = jwt.SigningMethodRS384.Alg()
+	algRS512          = jwt.SigningMethodRS512.Alg()
+	algEdDSA          = jwt.SigningMethodEdDSA.Alg()
+	validMethods      = []string{algRS256, algRS384, algRS512, algEdDSA}
+	hexEncodedMatcher = regexp.MustCompile("^[0-9a-fA-F]+$")
 )
 
 const (
@@ -291,7 +293,7 @@ func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log
 		return nil, fmt.Errorf("did not receive a valid public key in response")
 	}
 
-	return ed25519.PublicKey(pk.PublicKey), nil
+	return pk.PublicKey, nil
 }
 
 func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte, log *logrus.Entry) ([]byte, error) {
@@ -509,4 +511,13 @@ func NatsConnectionHelpers(token string, collective string, seedFile string, log
 	}
 
 	return inbox, jwth, sigh, nil
+}
+
+// IsEncodedEd25519Key determines if b holds valid characters for a hex encoded public key or seed
+func IsEncodedEd25519Key(b []byte) bool {
+	if len(b) != 64 {
+		return false
+	}
+
+	return hexEncodedMatcher.Match(b)
 }
