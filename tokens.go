@@ -163,6 +163,23 @@ func TokenPurposeBytes(token []byte) Purpose {
 	return TokenPurpose(string(token))
 }
 
+// TokenSigningAlgorithmBytes determines the signing algorithm used for a token
+func TokenSigningAlgorithmBytes(token []byte) (string, error) {
+	return TokenSigningAlgorithm(string(token))
+}
+
+// TokenSigningAlgorithm determines the signing algorithm used for a token
+func TokenSigningAlgorithm(token string) (string, error) {
+	parser := new(jwt.Parser)
+	claims := StandardClaims{}
+	t, _, err := parser.ParseUnverified(token, &claims)
+	if err != nil {
+		return "", err
+	}
+
+	return t.Method.Alg(), nil
+}
+
 // SignTokenWithKeyFile signs a JWT using an RSA Private Key in PEM format
 func SignTokenWithKeyFile(claims jwt.Claims, pkFile string) (string, error) {
 	keydat, err := os.ReadFile(pkFile)

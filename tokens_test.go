@@ -186,6 +186,13 @@ var _ = Describe("Tokens", func() {
 		})
 	})
 
+	Describe("TokenSigningAlgorithm", func() {
+		It("Should extract the correct algo", func() {
+			Expect(TokenSigningAlgorithm(string(provJWTRSA))).To(Equal("RS256"))
+			Expect(TokenSigningAlgorithm(string(provJWTED25519))).To(Equal("EdDSA"))
+		})
+	})
+
 	Describe("SignToken", func() {
 		Describe("ED25519", func() {
 			It("Should correctly sign the token", func() {
