@@ -46,10 +46,9 @@ const (
 	OrgIssuerPrefix   = "I-"
 	ChainIssuerPrefix = "C-"
 	DefaultValidity   = time.Hour
-	version           = "v0.0.1"
 )
 
-var defaultIssuer = fmt.Sprintf("Choria Tokens Package %s", version)
+var defaultIssuer = "Choria Tokens Package"
 
 // Purpose indicates what kind of token a JWT is and helps us parse it into the right data structure
 type Purpose string
