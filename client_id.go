@@ -6,7 +6,9 @@ package tokens
 
 import (
 	"crypto/ed25519"
+	"crypto/fips140"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
@@ -92,7 +94,13 @@ var (
 
 // UniqueID returns the caller id and unique id used to generate private inboxes
 func (c *ClientIDClaims) UniqueID() (id string, uid string) {
-	return c.CallerID, fmt.Sprintf("%x", md5.Sum([]byte(c.CallerID)))
+	var hash any
+	if fips140.Enabled() {
+		hash = sha256.Sum256([]byte(c.CallerID))
+	} else {
+		hash = md5.Sum([]byte(c.CallerID))
+	}
+	return c.CallerID, fmt.Sprintf("%x", hash)
 }
 
 // NewClientIDClaims generates new ClientIDClaims
