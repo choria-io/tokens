@@ -63,7 +63,7 @@ func (c *ServerClaims) UniqueID() (id string, uid string) {
 	if fips140.Enabled() {
 		hash = sha256.Sum256([]byte(c.ChoriaIdentity))
 	} else {
-		md5.Sum([]byte(c.ChoriaIdentity))
+		hash = md5.Sum([]byte(c.ChoriaIdentity))
 	}
 	return c.ChoriaIdentity, fmt.Sprintf("%x", hash)
 }
