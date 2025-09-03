@@ -7,7 +7,9 @@ package tokens
 import (
 	"bytes"
 	"crypto/ed25519"
+	"crypto/fips140"
 	"crypto/md5"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -57,7 +59,13 @@ var (
 
 // UniqueID returns the identity and unique id used to generate private inboxes
 func (c *ServerClaims) UniqueID() (id string, uid string) {
-	return c.ChoriaIdentity, fmt.Sprintf("%x", md5.Sum([]byte(c.ChoriaIdentity)))
+	var hash any
+	if fips140.Enabled() {
+		hash = sha256.Sum256([]byte(c.ChoriaIdentity))
+	} else {
+		hash = md5.Sum([]byte(c.ChoriaIdentity))
+	}
+	return c.ChoriaIdentity, fmt.Sprintf("%x", hash)
 }
 
 // IsMatchingPublicKey checks that the stored public key matches the supplied one
