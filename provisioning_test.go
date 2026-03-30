@@ -9,7 +9,7 @@ import (
 	"crypto/rand"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -95,7 +95,7 @@ var _ = Describe("ProvisioningClaims", func() {
 	Describe("ParseProvisioningToken", func() {
 		It("Should verify the token", func() {
 			t, err := ParseProvisioningToken(expiredToken, loadRSAPubKey("testdata/rsa/signer-public.pem"))
-			Expect(err.Error()).To(MatchRegexp("could not parse provisioner token: token is expired by"))
+			Expect(err.Error()).To(MatchRegexp("could not parse provisioner token: .+token is expired"))
 			Expect(t).To(BeNil())
 		})
 
