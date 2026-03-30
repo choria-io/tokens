@@ -44,6 +44,11 @@ var _ = Describe("ServerClaims", func() {
 			Expect(err).To(MatchError("public key is required"))
 		})
 
+		It("Should require validity", func() {
+			_, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "", nil, nil, pubK, "", 0)
+			Expect(err).To(MatchError("validity is required"))
+		})
+
 		It("Should create a valid token", func() {
 			perms := &ServerPermissions{Submission: true}
 			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", perms, []string{"choria.registration"}, pubK, "ginkgo issuer", 365*24*time.Hour)
@@ -206,7 +211,96 @@ var _ = Describe("ServerClaims", func() {
 		})
 	})
 
+	Describe("UnverifiedIdentityFromServerToken", func() {
+		It("Should fail for invalid tokens", func() {
+			_, _, err := UnverifiedIdentityFromServerToken("invalid")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should fail for non-server tokens", func() {
+			pt, err := os.ReadFile("testdata/rsa/good-provisioning.jwt")
+			Expect(err).ToNot(HaveOccurred())
+			_, _, err = UnverifiedIdentityFromServerToken(string(pt))
+			Expect(err).To(MatchError(ErrNotAServerToken))
+		})
+
+		It("Should fail for empty identity", func() {
+			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", nil, nil, pubK, "ginkgo issuer", 365*24*time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+			claims.ChoriaIdentity = ""
+			signed, err := SignToken(claims, priK)
+			Expect(err).ToNot(HaveOccurred())
+
+			_, _, err = UnverifiedIdentityFromServerToken(signed)
+			Expect(err).To(MatchError("invalid identity in token"))
+		})
+
+		It("Should extract identity from valid server tokens", func() {
+			perms := &ServerPermissions{Submission: true}
+			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", perms, nil, pubK, "ginkgo issuer", 365*24*time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+			signed, err := SignToken(claims, priK)
+			Expect(err).ToNot(HaveOccurred())
+
+			t, identity, err := UnverifiedIdentityFromServerToken(signed)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(identity).To(Equal("ginkgo.example.net"))
+			Expect(t).ToNot(BeNil())
+		})
+	})
+
+	Describe("ParseServerTokenFileUnverified", func() {
+		It("Should fail for missing files", func() {
+			_, err := ParseServerTokenFileUnverified("/nonexisting")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should fail for non-server tokens", func() {
+			_, err := ParseServerTokenFileUnverified("testdata/rsa/good-provisioning.jwt")
+			Expect(err).To(MatchError(ErrNotAServerToken))
+		})
+
+		It("Should parse valid server token files", func() {
+			perms := &ServerPermissions{Submission: true}
+			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", perms, nil, pubK, "ginkgo issuer", 365*24*time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+			signed, err := SignToken(claims, priK)
+			Expect(err).ToNot(HaveOccurred())
+
+			tf, err := os.CreateTemp("", "")
+			Expect(err).ToNot(HaveOccurred())
+			defer os.Remove(tf.Name())
+			_, err = tf.WriteString(signed)
+			Expect(err).ToNot(HaveOccurred())
+			tf.Close()
+
+			parsed, err := ParseServerTokenFileUnverified(tf.Name())
+			Expect(err).ToNot(HaveOccurred())
+			Expect(parsed.ChoriaIdentity).To(Equal("ginkgo.example.net"))
+			Expect(parsed.Permissions.Submission).To(BeTrue())
+		})
+	})
+
+	Describe("ParseServerToken", func() {
+		It("Should fail for non-server tokens", func() {
+			pt, err := os.ReadFile("testdata/rsa/good-provisioning.jwt")
+			Expect(err).ToNot(HaveOccurred())
+			_, err = ParseServerToken(string(pt), loadRSAPubKey("testdata/rsa/signer-public.pem"))
+			Expect(err).To(MatchError(ContainSubstring("not a server token")))
+		})
+	})
+
 	Describe("ParseServerTokenWithKeyfile", func() {
+		It("Should fail for empty key file path", func() {
+			_, err := ParseServerTokenWithKeyfile("token", "")
+			Expect(err).To(MatchError("invalid public key file"))
+		})
+
+		It("Should fail for nonexistent key file", func() {
+			_, err := ParseServerTokenWithKeyfile("token", "/nonexisting")
+			Expect(err).To(MatchError(ContainSubstring("could not read validation certificate")))
+		})
+
 		It("Should fail for invalid rsa tokens", func() {
 			perms := &ServerPermissions{Submission: true}
 			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", perms, nil, pubK, "ginkgo issuer", 365*24*time.Hour)

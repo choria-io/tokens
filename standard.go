@@ -389,13 +389,27 @@ func (c *StandardClaims) IsSignedByIssuer(pk ed25519.PublicKey) (bool, ed25519.P
 			return false, nil, fmt.Errorf("no issuer expires set")
 		}
 
-		_, hPubk, tcs, sig, err := c.ParseChainIssuerData()
+		id, hPubk, tcs, sig, err := c.ParseChainIssuerData()
 		if err != nil {
 			return false, nil, err
 		}
 
-		// this is the signature from the handler
-		// now we check the signature is data + "." + sig(id+ "." + data)
+		// verify the org issuer signed the chain issuer's credentials (id + pubk)
+		orgSig, err := hex.DecodeString(tcs)
+		if err != nil {
+			return false, nil, fmt.Errorf("invalid trust chain signature encoding: %w", err)
+		}
+
+		orgData := fmt.Sprintf("%s.%s", id, hex.EncodeToString(hPubk))
+		orgValid, err := ed25519Verify(pk, []byte(orgData), orgSig)
+		if err != nil {
+			return false, nil, fmt.Errorf("org issuer signature validation failed: %w", err)
+		}
+		if !orgValid {
+			return false, nil, fmt.Errorf("chain issuer credentials not signed by org issuer")
+		}
+
+		// verify the chain issuer signed the user data
 		ok, err := ed25519Verify(hPubk, []byte(fmt.Sprintf("%s.%s", c.ID, tcs)), sig)
 		if err != nil {
 			return false, nil, fmt.Errorf("chain signature validation failed: %w", err)

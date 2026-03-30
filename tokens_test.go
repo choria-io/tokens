@@ -131,6 +131,50 @@ var _ = Describe("Tokens", func() {
 		})
 	})
 
+	Describe("ParseTokenUnverified", func() {
+		It("Should fail for invalid tokens", func() {
+			_, err := ParseTokenUnverified("invalid")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should parse valid tokens without verification", func() {
+			claims, err := ParseTokenUnverified(string(provJWTRSA))
+			Expect(err).ToNot(HaveOccurred())
+			Expect(claims).ToNot(BeNil())
+			Expect(claims["sub"]).To(Equal("choria_provisioning"))
+		})
+
+		It("Should parse expired tokens without error", func() {
+			c, err := newStandardClaims("ginkgo", ClientIDPurpose, time.Hour, false)
+			Expect(err).ToNot(HaveOccurred())
+			c.ExpiresAt = jwt.NewNumericDate(time.Now().Add(-1 * time.Hour))
+			signed, err := SignToken(c, loadRSAPriKey("testdata/rsa/signer-key.pem"))
+			Expect(err).ToNot(HaveOccurred())
+
+			claims, err := ParseTokenUnverified(signed)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(claims).ToNot(BeNil())
+			Expect(claims["purpose"]).To(Equal("choria_client_id"))
+		})
+	})
+
+	Describe("TokenSigningAlgorithmBytes", func() {
+		It("Should extract the correct algo from bytes", func() {
+			alg, err := TokenSigningAlgorithmBytes(provJWTRSA)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(alg).To(Equal("RS256"))
+
+			alg, err = TokenSigningAlgorithmBytes(provJWTED25519)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(alg).To(Equal("EdDSA"))
+		})
+
+		It("Should fail for invalid tokens", func() {
+			_, err := TokenSigningAlgorithmBytes([]byte("invalid"))
+			Expect(err).To(HaveOccurred())
+		})
+	})
+
 	Describe("ParseToken", func() {
 		Describe("ED25519", func() {
 			It("Should parse and verify the token", func() {
@@ -184,6 +228,28 @@ var _ = Describe("Tokens", func() {
 			Expect(TokenPurposeBytes(provJWTRSA)).To(Equal(ProvisioningPurpose))
 			Expect(TokenPurpose(string(provJWTRSA))).To(Equal(ProvisioningPurpose))
 		})
+
+		It("Should detect server purpose", func() {
+			pubk, prik := loadEd25519Seed("testdata/ed25519/signer.seed")
+			claims, err := NewServerClaims("ginkgo.example.net", []string{"choria"}, "ginkgo_org", nil, nil, pubk, "ginkgo", 365*24*time.Hour)
+			Expect(err).ToNot(HaveOccurred())
+			signed, err := SignToken(claims, prik)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(TokenPurpose(signed)).To(Equal(ServerPurpose))
+		})
+
+		It("Should detect client id purpose", func() {
+			pubk, prik := loadEd25519Seed("testdata/ed25519/signer.seed")
+			claims, err := NewClientIDClaims("up=ginkgo", nil, "", nil, "", "", time.Hour, nil, pubk)
+			Expect(err).ToNot(HaveOccurred())
+			signed, err := SignToken(claims, prik)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(TokenPurpose(signed)).To(Equal(ClientIDPurpose))
+		})
+
+		It("Should return unknown for invalid tokens", func() {
+			Expect(TokenPurpose("invalid")).To(Equal(UnknownPurpose))
+		})
 	})
 
 	Describe("TokenSigningAlgorithm", func() {
@@ -194,6 +260,13 @@ var _ = Describe("Tokens", func() {
 	})
 
 	Describe("SignToken", func() {
+		It("Should fail for unsupported key types", func() {
+			claims, err := newStandardClaims("ginkgo", ProvisioningPurpose, 0, false)
+			Expect(err).ToNot(HaveOccurred())
+			_, err = SignToken(claims, "not a key")
+			Expect(err).To(MatchError("unsupported private key"))
+		})
+
 		Describe("ED25519", func() {
 			It("Should correctly sign the token", func() {
 				claims, err := newStandardClaims("ginkgo", ProvisioningPurpose, 0, false)
@@ -236,6 +309,27 @@ var _ = Describe("Tokens", func() {
 	})
 
 	Describe("SignTokenWithKeyFile", func() {
+		It("Should fail for missing key file", func() {
+			claims, err := newStandardClaims("ginkgo", ProvisioningPurpose, 0, false)
+			Expect(err).ToNot(HaveOccurred())
+			_, err = SignTokenWithKeyFile(claims, "/nonexisting")
+			Expect(err).To(MatchError(ContainSubstring("could not read signing key")))
+		})
+
+		It("Should fail for unsupported key file contents", func() {
+			claims, err := newStandardClaims("ginkgo", ProvisioningPurpose, 0, false)
+			Expect(err).ToNot(HaveOccurred())
+
+			tf, err := os.CreateTemp("", "")
+			Expect(err).ToNot(HaveOccurred())
+			defer os.Remove(tf.Name())
+			tf.WriteString("not a valid key")
+			tf.Close()
+
+			_, err = SignTokenWithKeyFile(claims, tf.Name())
+			Expect(err).To(MatchError(ContainSubstring("unsupported key")))
+		})
+
 		Describe("ED25519", func() {
 			It("Should correctly sign the token", func() {
 				claims, err := newStandardClaims("ginkgo", ProvisioningPurpose, 0, false)

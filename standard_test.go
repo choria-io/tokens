@@ -250,6 +250,46 @@ var _ = Describe("StandardClaims", func() {
 				Expect(ok).To(BeFalse())
 			})
 
+			It("Should reject tokens with fake chain issuer credentials", func() {
+				// the real org issuer - attacker does NOT have this private key
+				orgPubK, _, err := ed25519.GenerateKey(rand.Reader)
+				Expect(err).ToNot(HaveOccurred())
+
+				// attacker generates their own keypair
+				attackerPubK, attackerPriK, err := ed25519.GenerateKey(rand.Reader)
+				Expect(err).ToNot(HaveOccurred())
+
+				// attacker creates a fake handler using their own key
+				fakeHandler, err := NewClientIDClaims("choria=fake_handler", nil, "", nil, "", "", time.Minute, nil, attackerPubK)
+				Expect(err).ToNot(HaveOccurred())
+
+				// attacker fabricates a TCS - NOT signed by the real org issuer
+				// they sign it with their own key instead
+				fakeTCSData := fmt.Sprintf("%s.%s", fakeHandler.ID, hex.EncodeToString(attackerPubK))
+				fakeTCSSig, err := ed25519Sign(attackerPriK, []byte(fakeTCSData))
+				Expect(err).ToNot(HaveOccurred())
+				fakeHandler.TrustChainSignature = hex.EncodeToString(fakeTCSSig)
+
+				// attacker creates a user token issued by the fake handler
+				userPubK, _, err := ed25519.GenerateKey(rand.Reader)
+				Expect(err).ToNot(HaveOccurred())
+				user, err := NewClientIDClaims("choria=victim", nil, "", nil, "", "", time.Minute, nil, userPubK)
+				Expect(err).ToNot(HaveOccurred())
+				Expect(user.SetChainIssuer(fakeHandler)).To(Succeed())
+
+				// attacker signs the user data with their own private key
+				udat, err := user.ChainIssuerData(fakeHandler.TrustChainSignature)
+				Expect(err).ToNot(HaveOccurred())
+				usig, err := ed25519Sign(attackerPriK, udat)
+				Expect(err).ToNot(HaveOccurred())
+				user.SetChainUserTrustSignature(fakeHandler, usig)
+
+				// this MUST fail - the org issuer (orgPubK) never signed the chain issuer's credentials
+				ok, _, err := user.IsSignedByIssuer(orgPubK)
+				Expect(err).To(HaveOccurred())
+				Expect(ok).To(BeFalse(), "forged chain token should not pass verification against org issuer")
+			})
+
 			It("Should detect correct signatures", func() {
 				// the org issuer
 				issuePubK, issuerPriK, err := ed25519.GenerateKey(rand.Reader)
@@ -284,6 +324,102 @@ var _ = Describe("StandardClaims", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(ok).To(BeTrue())
 			})
+		})
+	})
+
+	Describe("AddOrgIssuerData", func() {
+		It("Should fail without required data", func() {
+			c.ID = ""
+			err = c.AddOrgIssuerData(priK)
+			Expect(err).To(MatchError("no token id set"))
+		})
+
+		It("Should set issuer and trust chain signature", func() {
+			c.PublicKey = hex.EncodeToString(pubK)
+			err = c.AddOrgIssuerData(priK)
+			Expect(err).ToNot(HaveOccurred())
+
+			Expect(c.Issuer).To(Equal(fmt.Sprintf("I-%s", hex.EncodeToString(pubK))))
+			Expect(c.TrustChainSignature).ToNot(BeEmpty())
+			Expect(c.IsChainedIssuer(true)).To(BeTrue())
+		})
+	})
+
+	Describe("AddChainIssuerData", func() {
+		It("Should fail with invalid chain issuer", func() {
+			ci := &ClientIDClaims{}
+			err = c.AddChainIssuerData(ci, priK)
+			Expect(err).To(MatchError("id not set"))
+		})
+
+		It("Should set chain issuer data correctly", func() {
+			issuePubK, issuerPriK, err := ed25519.GenerateKey(rand.Reader)
+			Expect(err).ToNot(HaveOccurred())
+
+			handlerPubK, handlerPriK, err := ed25519.GenerateKey(rand.Reader)
+			Expect(err).ToNot(HaveOccurred())
+
+			userPubK, _, err := ed25519.GenerateKey(rand.Reader)
+			Expect(err).ToNot(HaveOccurred())
+
+			// create a chain issuer (handler) signed by org issuer
+			handler, err := NewClientIDClaims("choria=handler", nil, "", nil, "", "", time.Minute, nil, handlerPubK)
+			Expect(err).ToNot(HaveOccurred())
+			err = handler.AddOrgIssuerData(issuerPriK)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(handler.IsChainedIssuer(true)).To(BeTrue())
+
+			// create a user issued by the handler using AddChainIssuerData
+			user, err := NewClientIDClaims("choria=user", nil, "", nil, "", "", time.Minute, nil, userPubK)
+			Expect(err).ToNot(HaveOccurred())
+			err = user.AddChainIssuerData(handler, handlerPriK)
+			Expect(err).ToNot(HaveOccurred())
+
+			// verify the chain
+			ok, _, err := user.IsSignedByIssuer(issuePubK)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(ok).To(BeTrue())
+		})
+	})
+
+	Describe("SetChainIssuerTrustSignature", func() {
+		It("Should set the trust chain signature", func() {
+			sig := []byte("test signature data")
+			c.SetChainIssuerTrustSignature(sig)
+			Expect(c.TrustChainSignature).To(Equal(hex.EncodeToString(sig)))
+		})
+	})
+
+	Describe("IsChainedIssuer", func() {
+		It("Should fail without trust chain signature", func() {
+			c.TrustChainSignature = ""
+			Expect(c.IsChainedIssuer(false)).To(BeFalse())
+		})
+
+		It("Should fail without org issuer prefix", func() {
+			c.TrustChainSignature = "x"
+			c.Issuer = "C-x"
+			Expect(c.IsChainedIssuer(false)).To(BeFalse())
+		})
+
+		It("Should return true without verify when data looks valid", func() {
+			c.TrustChainSignature = "x"
+			c.Issuer = "I-x"
+			Expect(c.IsChainedIssuer(false)).To(BeTrue())
+		})
+
+		It("Should fail verify with invalid hex in issuer", func() {
+			c.TrustChainSignature = "x"
+			c.Issuer = "I-!invalid!"
+			c.PublicKey = "x"
+			Expect(c.IsChainedIssuer(true)).To(BeFalse())
+		})
+
+		It("Should fail verify with invalid hex in tcs", func() {
+			c.PublicKey = hex.EncodeToString(pubK)
+			c.Issuer = fmt.Sprintf("I-%s", hex.EncodeToString(pubK))
+			c.TrustChainSignature = "!invalid!"
+			Expect(c.IsChainedIssuer(true)).To(BeFalse())
 		})
 	})
 
