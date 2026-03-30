@@ -20,6 +20,7 @@ import (
 	"net/url"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -134,7 +135,7 @@ func ParseToken(token string, claims jwt.Claims, pk any) error {
 	return nil
 }
 
-// ParseTokenUnverified parses token into claims and DOES not verify the token validity in any way
+// ParseTokenUnverified parses token into claims and DOES NOT verify the token validity in any way
 func ParseTokenUnverified(token string) (jwt.MapClaims, error) {
 	parser := new(jwt.Parser)
 	claims := new(jwt.MapClaims)
@@ -242,30 +243,52 @@ func SaveAndSignTokenWithKeyFile(claims jwt.Claims, pkFile string, outFile strin
 	return os.WriteFile(outFile, []byte(token), perm)
 }
 
-func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log *logrus.Entry) (ed25519.PublicKey, error) {
+// maxVaultResponseSize is the maximum allowed Vault API response body size (1 MB)
+const maxVaultResponseSize = 1 << 20
+
+// vaultClientTimeout is the HTTP client timeout for Vault API requests
+const vaultClientTimeout = 30 * time.Second
+
+// newVaultRequest creates an authenticated HTTP request to Vault.
+// It validates that VAULT_ADDR uses HTTPS and that VAULT_TOKEN is set.
+func newVaultRequest(ctx context.Context, tlsc *tls.Config, method string, path string, body io.Reader) (*http.Client, *http.Request, error) {
 	vt := os.Getenv("VAULT_TOKEN")
 	va := os.Getenv("VAULT_ADDR")
 
 	if vt == "" || va == "" {
-		return nil, fmt.Errorf("requires VAULT_TOKEN and VAULT_ADDR environment variables")
+		return nil, nil, fmt.Errorf("requires VAULT_TOKEN and VAULT_ADDR environment variables")
 	}
 
 	uri, err := url.Parse(va)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
-	uri.Path = fmt.Sprintf("/v1/transit/keys/%s", key)
-	client := &http.Client{}
+	if uri.Scheme != "https" {
+		return nil, nil, fmt.Errorf("VAULT_ADDR must use https scheme, got %q", uri.Scheme)
+	}
+
+	uri.Path = path
+
+	client := &http.Client{Timeout: vaultClientTimeout}
 	if tlsc != nil {
 		client.Transport = &http.Transport{TLSClientConfig: tlsc}
 	}
 
-	req, err := http.NewRequestWithContext(ctx, "GET", uri.String(), nil)
+	req, err := http.NewRequestWithContext(ctx, method, uri.String(), body)
+	if err != nil {
+		return nil, nil, err
+	}
+	req.Header.Add("X-Vault-Token", vt)
+
+	return client, req, nil
+}
+
+func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log *logrus.Entry) (ed25519.PublicKey, error) {
+	client, req, err := newVaultRequest(ctx, tlsc, "GET", fmt.Sprintf("/v1/transit/keys/%s", key), nil)
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("X-Vault-Token", vt)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -273,7 +296,7 @@ func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxVaultResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -282,7 +305,7 @@ func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log
 		return nil, fmt.Errorf("request failed: code: %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Debugf("JSON Response: %s", string(body))
+	log.Debugf("Vault key request completed: status=%d size=%d", resp.StatusCode, len(body))
 
 	var vr struct {
 		Data struct {
@@ -300,7 +323,22 @@ func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log
 		return nil, fmt.Errorf("did not receive keys in response")
 	}
 
-	pk, ok := vr.Data.Keys["1"]
+	// find the latest key version
+	latestVersion := 0
+	for v := range vr.Data.Keys {
+		n, err := strconv.Atoi(v)
+		if err != nil {
+			continue
+		}
+		if n > latestVersion {
+			latestVersion = n
+		}
+	}
+	if latestVersion == 0 {
+		return nil, fmt.Errorf("did not receive valid key versions in response")
+	}
+
+	pk, ok := vr.Data.Keys[strconv.Itoa(latestVersion)]
 	if !ok {
 		return nil, fmt.Errorf("did not receive keys in response")
 	}
@@ -313,20 +351,6 @@ func getVaultIssuerPubKey(ctx context.Context, tlsc *tls.Config, key string, log
 }
 
 func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte, log *logrus.Entry) ([]byte, error) {
-	vt := os.Getenv("VAULT_TOKEN")
-	va := os.Getenv("VAULT_ADDR")
-
-	if vt == "" || va == "" {
-		return nil, fmt.Errorf("requires VAULT_TOKEN and VAULT_ADDR environment variables")
-	}
-
-	uri, err := url.Parse(va)
-	if err != nil {
-		return nil, err
-	}
-
-	uri.Path = fmt.Sprintf("/v1/transit/sign/%s", key)
-
 	dat := map[string]any{
 		"signature_algorithm": "ed25519",
 		"input":               base64.StdEncoding.EncodeToString(ss),
@@ -335,18 +359,11 @@ func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte,
 	if err != nil {
 		return nil, err
 	}
-	log.Debugf("JSON Request: %s", string(jdat))
 
-	client := &http.Client{}
-	if tlsc != nil {
-		client.Transport = &http.Transport{TLSClientConfig: tlsc}
-	}
-
-	req, err := http.NewRequestWithContext(ctx, "POST", uri.String(), bytes.NewBuffer(jdat))
+	client, req, err := newVaultRequest(ctx, tlsc, "POST", fmt.Sprintf("/v1/transit/sign/%s", key), bytes.NewBuffer(jdat))
 	if err != nil {
 		return nil, err
 	}
-	req.Header.Add("X-Vault-Token", vt)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -354,7 +371,7 @@ func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte,
 	}
 	defer resp.Body.Close()
 
-	body, err := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(io.LimitReader(resp.Body, maxVaultResponseSize))
 	if err != nil {
 		return nil, err
 	}
@@ -363,7 +380,7 @@ func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte,
 		return nil, fmt.Errorf("request failed: code: %d: %s", resp.StatusCode, string(body))
 	}
 
-	log.Debugf("JSON Response: %s", string(body))
+	log.Debugf("Vault sign request completed: status=%d size=%d", resp.StatusCode, len(body))
 
 	var vr struct {
 		Data struct {
@@ -376,7 +393,7 @@ func signWithVault(ctx context.Context, tlsc *tls.Config, key string, ss []byte,
 	}
 
 	if vr.Data.Sig == "" {
-		return nil, fmt.Errorf("no signature in response: %s", string(body))
+		return nil, fmt.Errorf("no signature in response")
 	}
 
 	const vaultSigPrefix = "vault:v1:"

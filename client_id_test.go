@@ -109,7 +109,35 @@ var _ = Describe("ClientIDClaims", func() {
 		})
 	})
 
+	Describe("ParseClientIDTokenUnverified", func() {
+		It("Should fail for invalid tokens", func() {
+			_, err := ParseClientIDTokenUnverified("invalid")
+			Expect(err).To(HaveOccurred())
+		})
+
+		It("Should fail for non-client tokens", func() {
+			_, err := ParseClientIDTokenUnverified(string(provToken))
+			Expect(err).To(MatchError(ErrNotAClientToken))
+		})
+
+		It("Should parse valid client tokens", func() {
+			claims, err := ParseClientIDTokenUnverified(validToken)
+			Expect(err).ToNot(HaveOccurred())
+			Expect(claims.CallerID).To(Equal("up=ginkgo"))
+		})
+	})
+
 	Describe("ParseClientIDTokenWithKeyfile", func() {
+		It("Should fail for empty key file", func() {
+			_, err := ParseClientIDTokenWithKeyfile(validToken, "", false)
+			Expect(err).To(MatchError("invalid public key file"))
+		})
+
+		It("Should fail for nonexistent key file", func() {
+			_, err := ParseClientIDTokenWithKeyfile(validToken, "/nonexisting", false)
+			Expect(err).To(MatchError(ContainSubstring("could not read validation certificate")))
+		})
+
 		It("Should parse using the file", func() {
 			claims, err := ParseClientIDTokenWithKeyfile(validToken, "testdata/rsa/signer-public.pem", false)
 			Expect(err).ToNot(HaveOccurred())
