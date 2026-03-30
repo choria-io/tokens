@@ -13,7 +13,7 @@ import (
 	"runtime"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 	"github.com/sirupsen/logrus"
@@ -184,10 +184,10 @@ var _ = Describe("Tokens", func() {
 
 				pubK, _ := loadEd25519Seed("testdata/ed25519/other.seed")
 				err = ParseToken(string(provJWTED25519), claims, pubK)
-				Expect(err).To(MatchError("ed25519: verification error"))
+				Expect(err).To(MatchError(ContainSubstring("ed25519: verification error")))
 
 				err = ParseToken(string(provJWTED25519), claims, loadRSAPubKey("testdata/rsa/other-public.pem"))
-				Expect(err).To(MatchError("ed25519 public key required"))
+				Expect(err).To(MatchError(ContainSubstring("ed25519 public key required")))
 
 				pubK, _ = loadEd25519Seed("testdata/ed25519/signer.seed")
 				err = ParseToken(string(provJWTED25519), claims, pubK)
@@ -211,11 +211,11 @@ var _ = Describe("Tokens", func() {
 				Expect(err).To(MatchError("invalid public key"))
 
 				err = ParseToken(string(provJWTRSA), claims, loadRSAPubKey("testdata/rsa/other-public.pem"))
-				Expect(err).To(MatchError("crypto/rsa: verification error"))
+				Expect(err).To(MatchError(ContainSubstring("crypto/rsa: verification error")))
 
 				pubK, _ := loadEd25519Seed("testdata/ed25519/other.seed")
 				err = ParseToken(string(provJWTRSA), claims, pubK)
-				Expect(err).To(MatchError("rsa public key required"))
+				Expect(err).To(MatchError(ContainSubstring("rsa public key required")))
 
 				err = ParseToken(string(provJWTRSA), claims, loadRSAPubKey("testdata/rsa/signer-public.pem"))
 				Expect(err).ToNot(HaveOccurred())
@@ -279,7 +279,7 @@ var _ = Describe("Tokens", func() {
 
 				claims = &StandardClaims{}
 				err = ParseToken(t, claims, loadRSAPubKey("testdata/rsa/signer-public.pem"))
-				Expect(err).To(MatchError("ed25519 public key required"))
+				Expect(err).To(MatchError(ContainSubstring("ed25519 public key required")))
 
 				claims = &StandardClaims{}
 				err = ParseToken(t, claims, pubK)
@@ -299,7 +299,7 @@ var _ = Describe("Tokens", func() {
 
 				claims = &StandardClaims{}
 				err = ParseToken(t, claims, pubK)
-				Expect(err).To(MatchError("rsa public key required"))
+				Expect(err).To(MatchError(ContainSubstring("rsa public key required")))
 
 				err = ParseToken(t, claims, loadRSAPubKey("testdata/rsa/signer-public.pem"))
 				Expect(err).ToNot(HaveOccurred())

@@ -309,7 +309,7 @@ var _ = Describe("ServerClaims", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = ParseServerTokenWithKeyfile(signed, "testdata/rsa/other-public.pem")
-			Expect(err).To(MatchError("could not parse server id token: crypto/rsa: verification error"))
+			Expect(err).To(MatchError(ContainSubstring("crypto/rsa: verification error")))
 		})
 
 		It("Should fail for invalid ed25519 tokens", func() {
@@ -320,7 +320,7 @@ var _ = Describe("ServerClaims", func() {
 			Expect(err).ToNot(HaveOccurred())
 
 			_, err = ParseServerTokenWithKeyfile(signed, "testdata/ed25519/other.public")
-			Expect(err).To(MatchError("could not parse server id token: ed25519: verification error"))
+			Expect(err).To(MatchError(ContainSubstring("ed25519: verification error")))
 		})
 
 		It("Should parse valid rsa tokens", func() {

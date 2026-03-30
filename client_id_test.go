@@ -12,7 +12,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v4"
+	"github.com/golang-jwt/jwt/v5"
 	. "github.com/onsi/ginkgo/v2"
 	. "github.com/onsi/gomega"
 )
@@ -90,7 +90,7 @@ var _ = Describe("ClientIDClaims", func() {
 			Expect(claims.CallerID).To(Equal(""))
 
 			claims, err = ParseClientIDToken(expiredToken, loadRSAPubKey("testdata/rsa/signer-public.pem"), false)
-			Expect(err.Error()).To(MatchRegexp("could not parse client id token: token is expired by"))
+			Expect(err.Error()).To(MatchRegexp("could not parse client id token: .+token is expired"))
 			Expect(claims).To(BeNil())
 		})
 
